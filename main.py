@@ -116,7 +116,7 @@ def create_calendar():
 
     1. カレンダーの日付を生成する。
     2. スケジュールデータを読み込む。
-    3. 各日付に対して目標時間を取得する。
+    3. 各日付に対して目標時間を設定する。
     4. 結果をCSVおよびExcelファイルとして保存する。
     """
 
@@ -126,7 +126,7 @@ def create_calendar():
     schedule_df = pd.read_csv('training_schedule.csv')
     schedule_df['apply_start_dt'] = pd.to_datetime(schedule_df['apply_start_dt'])
 
-    # 各日付に対して労働時間を計算
+    # 各日付に対して目標時間を設定
     df['hours'] = df.apply(get_hours, axis=1, schedule_df=schedule_df)
 
     # 結果を保存
