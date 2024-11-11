@@ -15,8 +15,8 @@ def get_holidays_api(fiscal_year: int) -> Dict[str, str]:
     :param fiscal_year: 取得したい年
     :return: 祝日データの辞書 {日付: 祝日名}
     """
+    
     holiday_list = []
-
     for year in range(fiscal_year, fiscal_year + 2):
         url = f"https://holidays-jp.shogo82148.com/{year}"
         response = requests.get(url)
@@ -48,7 +48,7 @@ def get_date_range(fiscal_year) -> tuple[date, date]:
 
 def generate_calendar_dates(fiscal_year: int) -> pd.DataFrame:
     """
-    与えられた年度日付を生成する関数。
+    与えられた年度の休日を生成する関数。
 
     以下のフィールドを持つDataFrameを返す。
     - date: 日付
@@ -63,7 +63,7 @@ def generate_calendar_dates(fiscal_year: int) -> pd.DataFrame:
     """
 
     # APIで休日リストを取得
-    holidays_dict = get_holidays_api(2024)
+    holidays_dict = get_holidays_api(fiscal_year)
     holidays = pd.DataFrame(holidays_dict.items(), columns=['date', 'holiday_name'])
     holidays['date'] = pd.to_datetime(holidays['date'])
 
@@ -90,7 +90,7 @@ def generate_calendar_dates(fiscal_year: int) -> pd.DataFrame:
 
 def get_hours(row: pd, schedule_df: pd.DataFrame) -> float:
     """
-    与えられた日付に対して、スケジュールデータから労働時間を取得する関数。
+    与えられた日付に対して、スケジュールデータから対応する目標時間を取得する関数。
 
     :param pandas row: 日付の行データ
     :param pandas DataFrame schedule_df: スケジュールデータ
