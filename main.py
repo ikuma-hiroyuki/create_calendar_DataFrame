@@ -72,7 +72,7 @@ def generate_calendar_dates(fiscal_year: int) -> pd.DataFrame:
     date_range = pd.date_range(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
     calendar = pd.DataFrame(date_range, columns=['date'])
 
-    # 週番号と曜日名を追加
+    # 曜日番号と曜日名を追加
     calendar['weekday'] = calendar['date'].dt.weekday
     calendar['weekday_name'] = calendar['date'].dt.day_name(locale='ja_JP')
 
