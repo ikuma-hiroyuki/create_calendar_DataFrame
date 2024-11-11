@@ -15,7 +15,7 @@ def get_holidays_api(fiscal_year: int) -> Dict[str, str]:
     :param fiscal_year: 取得したい年
     :return: 祝日データの辞書 {日付: 祝日名}
     """
-    
+
     holiday_list = []
     for year in range(fiscal_year, fiscal_year + 2):
         url = f"https://holidays-jp.shogo82148.com/{year}"
