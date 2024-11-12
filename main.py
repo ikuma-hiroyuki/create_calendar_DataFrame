@@ -1,11 +1,39 @@
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date
+from enum import IntEnum
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
-import pandas as pd
+import polars as pl
 import requests
 
-base_dir = Path(__file__).resolve().parent
+
+class Weekday(IntEnum):
+    """曜日を表す列挙型"""
+    MONDAY = 0
+    TUESDAY = 1
+    WEDNESDAY = 2
+    THURSDAY = 3
+    FRIDAY = 4
+    SATURDAY = 5
+    SUNDAY = 6
+
+    @classmethod
+    def is_weekend(cls, day: int) -> bool:
+        """週末かどうかを判定"""
+        return day in (cls.SATURDAY, cls.SUNDAY)
+
+
+@dataclass
+class FiscalYear:
+    """年度を表すデータクラス"""
+    year: int
+
+    def get_date_range(self) -> Tuple[date, date]:
+        """年度の開始日と終了日を取得"""
+        start_date = date(self.year, 4, 1)
+        end_date = date(self.year + 1, 3, 31)
+        return start_date, end_date
 
 
 def get_holidays_api(fiscal_year: int) -> Dict[str, str]:
@@ -15,7 +43,6 @@ def get_holidays_api(fiscal_year: int) -> Dict[str, str]:
     :param fiscal_year: 取得したい年
     :return: 祝日データの辞書 {日付: 祝日名}
     """
-
     holiday_list = []
     for year in range(fiscal_year, fiscal_year + 2):
         url = f"https://holidays-jp.shogo82148.com/{year}"
@@ -31,111 +58,165 @@ def get_holidays_api(fiscal_year: int) -> Dict[str, str]:
     return holidays_dict
 
 
-def get_date_range(fiscal_year) -> tuple[date, date]:
-    """
-    指定された年度の年度開始日と終了日を返す関数
+class CalendarGenerator:
+    """カレンダー生成クラス"""
 
-    :param fiscal_year: 年度
-    :return: 年度の開始日と終了日
-    """
+    def __init__(self, fiscal_year: FiscalYear, schedule_path: Path) -> None:
+        """
+        :param fiscal_year: 年度
+        :param schedule_path: スケジュールファイルのパス
+        """
+        self.fiscal_year = fiscal_year
+        self.schedule_path = schedule_path
+        self.output_dir = Path(__file__).resolve().parent / 'results'
+        self.output_dir.mkdir(exist_ok=True)
 
-    target_date = datetime.strptime(f'{fiscal_year}/04/01', '%Y/%m/%d')
-    start_date = date(target_date.year, 4, 1)
-    end_date = date(target_date.year + 1, 3, 31)
+    def generate(self) -> None:
+        """
+        カレンダーの生成と保存
 
-    return start_date, end_date
+        処理の流れ:
+        1. _generate_calendar_dates() -> カレンダーの基本データを生成
+        2. _load_schedule() -> スケジュールを読み込み
+        3. _apply_schedule() -> スケジュールを適用
+        4. _select_output_columns() -> 出力用に列を選択
+        5. write_csv() -> CSVファイルとして保存
+        """
+        calendar_df = self._generate_calendar_dates()
+        schedule_df = self._load_schedule()
+        calendar_df = self._apply_schedule(calendar_df, schedule_df)
+        result_df = self._select_output_columns(calendar_df)
+        result_df.write_csv(self.output_dir / 'calendar.csv')
+
+    def _generate_calendar_dates(self) -> pl.DataFrame:
+        """
+        カレンダーデータの生成
+
+        処理の流れ:
+        1. _create_base_calendar() -> 基本カレンダーを作成
+        2. _create_holiday_frame() -> 祝日データを取得
+        3. _add_holiday_info() -> 休日情報を追加
+        """
+        calendar_df = self._create_base_calendar()
+        holidays_df = self._create_holiday_frame()
+        return self._add_holiday_info(calendar_df, holidays_df)
+
+    def _create_base_calendar(self) -> pl.DataFrame:
+        """
+        基本カレンダーの作成
+
+        処理の流れ:
+        1. 日付範囲の生成
+        2. _add_calendar_columns() -> 基本列の追加
+        """
+        start_date, end_date = self.fiscal_year.get_date_range()
+        date_range = pl.date_range(start_date, end_date, interval='1d', eager=True)
+        df = pl.DataFrame({'date': date_range})
+        return self._add_calendar_columns(df)
+
+    @staticmethod
+    def _add_calendar_columns(df: pl.DataFrame) -> pl.DataFrame:
+        """カレンダーの基本列を追加"""
+        # 曜日関連の列を追加
+        df = df.with_columns([
+            pl.col('date').dt.weekday().alias('weekday'),
+            pl.col('date').dt.strftime('%A').alias('weekday_name'),
+        ])
+
+        # 週末判定の列を追加
+        df = df.with_columns([
+            pl.col('weekday')
+            .map_elements(Weekday.is_weekend, return_dtype=pl.Boolean)
+            .alias('is_weekend')
+        ])
+
+        return df
+
+    def _create_holiday_frame(self) -> pl.DataFrame:
+        """祝日データフレームの作成"""
+        holidays_dict = get_holidays_api(self.fiscal_year.year)
+
+        return pl.DataFrame({
+            'date': pl.Series([k for k in holidays_dict.keys()]).cast(pl.Date),
+            'holiday_name': pl.Series([v for v in holidays_dict.values()])
+        })
+
+    @staticmethod
+    def _add_holiday_info(calendar_df: pl.DataFrame, holidays_df: pl.DataFrame) -> pl.DataFrame:
+        """休日情報の追加"""
+        # 祝日データを結合
+        df = calendar_df.join(holidays_df, on='date', how='left')
+
+        # 休日フラグを追加
+        df = df.with_columns([
+            (pl.col('is_weekend') | pl.col('holiday_name').is_not_null()).alias('is_holiday')
+        ])
+
+        # 週末の場合は休日名を設定
+        df = df.with_columns([
+            pl.when(pl.col('is_weekend'))
+            .then(pl.lit('週末'))
+            .otherwise(pl.col('holiday_name'))
+            .alias('holiday_name')
+        ])
+
+        return df
+
+    def _load_schedule(self) -> pl.DataFrame:
+        """スケジュールの読み込みと前処理"""
+        df = pl.read_csv(self.schedule_path)
+        return df.with_columns([
+            pl.col('apply_start_dt').str.strptime(pl.Date, format='%Y-%m-%d')
+        ])
+
+    @staticmethod
+    def _apply_schedule(calendar_df: pl.DataFrame, schedule_df: pl.DataFrame) -> pl.DataFrame:
+        """スケジュールの適用"""
+        # スケジュールを結合
+        df = calendar_df.join(
+            schedule_df,
+            left_on='date',
+            right_on='apply_start_dt',
+            how='left'
+        )
+
+        # 直前の有効なスケジュールを適用
+        df = df.with_columns([
+            pl.col('weekday_time').forward_fill(),
+            pl.col('holiday_time').forward_fill(),
+        ])
+
+        # 休日/平日に応じた時間を設定
+        df = df.with_columns([
+            pl.when(pl.col('is_holiday'))
+            .then(pl.col('holiday_time'))
+            .otherwise(pl.col('weekday_time'))
+            .alias('hours')
+        ])
+
+        return df
+
+    @staticmethod
+    def _select_output_columns(df: pl.DataFrame) -> pl.DataFrame:
+        """出力用の列を選択"""
+        return df.select([
+            'date',
+            'weekday_name',
+            'is_holiday',
+            'holiday_name',
+            'hours'
+        ])
 
 
-def generate_calendar_dates(fiscal_year: int) -> pd.DataFrame:
-    """
-    与えられた年度の休日を生成する関数。
-
-    以下のフィールドを持つDataFrameを返す。
-    - date: 日付
-    - weekday: 曜日（0: 月曜日, 1: 火曜日, ..., 6: 日曜日）
-    - weekday_name: 曜日名
-    - is_weekend: 週末かどうか
-    - is_holiday: 祝日かどうか
-    - holiday_name: 祝日名
-
-    :params fiscal_year: 年度
-    :returns: DataFrame
-    """
-
-    # APIで休日リストを取得
-    holidays_dict = get_holidays_api(fiscal_year)
-    holidays = pd.DataFrame(holidays_dict.items(), columns=['date', 'holiday_name'])
-    holidays['date'] = pd.to_datetime(holidays['date'])
-
-    # 日付の範囲を生成
-    start, end = get_date_range(fiscal_year)
-    date_range = pd.date_range(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
-    calendar = pd.DataFrame(date_range, columns=['date'])
-
-    # 曜日番号と曜日名を追加
-    calendar['weekday'] = calendar['date'].dt.weekday
-    calendar['weekday_name'] = calendar['date'].dt.day_name(locale='ja_JP')
-
-    # 週末かどうかを追加
-    calendar['is_weekend'] = calendar['weekday'].isin([5, 6])
-
-    # 休日かどうかを追加
-    calendar['is_holiday'] = calendar['date'].isin(holidays['date']) | calendar['weekday'].isin([5, 6])
-
-    # 休日名を追加
-    calendar = pd.merge(calendar, holidays, on='date', how='left')
-    calendar.loc[calendar['is_weekend'], 'holiday_name'] = '週末'
-    return calendar
-
-
-def get_hours(row: pd, schedule_df: pd.DataFrame) -> float:
-    """
-    与えられた日付に対して、スケジュールデータから対応する目標時間を取得する関数。
-
-    :param pandas row: 日付の行データ
-    :param pandas DataFrame schedule_df: スケジュールデータ
-    :return: float hours : 平日・休日に応じた目標時間
-    """
-
-    row_date = pd.Timestamp(row['date'])
-
-    for i in range(len(schedule_df)):
-        start_date = schedule_df.loc[i, 'apply_start_dt']
-        end_date = schedule_df.loc[i + 1, 'apply_start_dt'] if i + 1 < len(schedule_df) else pd.Timestamp('9999-12-31')
-
-        # 条件に該当する期間かチェック
-        if start_date <= row_date < end_date:
-            return schedule_df.loc[i, 'holiday_time'] if row['is_holiday'] else schedule_df.loc[i, 'weekday_time']
-
-    raise ValueError('No schedule found')
-
-
-def create_calendar():
-    """
-    メインの処理を実行する関数。
-
-    1. カレンダーの日付を生成する。
-    2. スケジュールデータを読み込む。
-    3. 各日付に対して目標時間を設定する。
-    4. 結果をCSVおよびExcelファイルとして保存する。
-    """
-
-    df = generate_calendar_dates(2024)
-
-    # CSVのデータを読み込む
-    schedule_df = pd.read_csv('training_schedule.csv')
-    schedule_df['apply_start_dt'] = pd.to_datetime(schedule_df['apply_start_dt'])
-
-    # 各日付に対して目標時間を設定
-    df['hours'] = df.apply(get_hours, axis=1, schedule_df=schedule_df)
-
-    # 結果を保存
-    result_df = df[['date', 'weekday_name', 'is_holiday', 'holiday_name', 'hours']]
-    output_dir = base_dir / 'results'
-    output_dir.mkdir(exist_ok=True)
-    result_df.to_csv('results/calendar.csv', index=False)
-    result_df.to_excel('results/calendar.xlsx', index=False)
+def main(fiscal_year) -> None:
+    """メイン処理"""
+    fiscal_year = FiscalYear(year=fiscal_year)
+    generator = CalendarGenerator(
+        fiscal_year=fiscal_year,
+        schedule_path=Path('training_schedule.csv')
+    )
+    generator.generate()
 
 
 if __name__ == '__main__':
-    create_calendar()
+    main(2024)
