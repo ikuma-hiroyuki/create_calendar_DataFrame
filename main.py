@@ -70,21 +70,22 @@ class CalendarGenerator:
         self.schedule_path = schedule_path
         self.output_dir = Path(__file__).resolve().parent / 'results'
         self.output_dir.mkdir(exist_ok=True)
+        self.schedule_df: pl.DataFrame = None
 
     def generate(self) -> None:
         """
         カレンダーの生成と保存
 
         処理の流れ:
-        1. _generate_calendar_dates() -> カレンダーの基本データを生成
-        2. _load_schedule() -> スケジュールを読み込み
+        1. _load_schedule() -> スケジュールを読み込み
+        2. _generate_calendar_dates() -> カレンダーの基本データを生成
         3. _apply_schedule() -> スケジュールを適用
         4. _select_output_columns() -> 出力用に列を選択
         5. write_csv() -> CSVファイルとして保存
         """
+        self.schedule_df = self._load_schedule()
         calendar_df = self._generate_calendar_dates()
-        schedule_df = self._load_schedule()
-        calendar_df = self._apply_schedule(calendar_df, schedule_df)
+        calendar_df = self._apply_schedule(calendar_df, self.schedule_df)
         result_df = self._select_output_columns(calendar_df)
         result_df.write_csv(self.output_dir / 'calendar.csv')
 
@@ -110,7 +111,9 @@ class CalendarGenerator:
         2. _add_calendar_columns() -> 基本列の追加
         """
         start_date, end_date = self.fiscal_year.get_date_range()
-        date_range = pl.date_range(start_date, end_date, interval='1d', eager=True)
+        schedule_start_date = self.schedule_df.filter(pl.col('apply_start_dt') < start_date).max()
+        schedule_start_date = schedule_start_date.to_series().to_list()[0]
+        date_range = pl.date_range(schedule_start_date, end_date, interval='1d', eager=True)
         df = pl.DataFrame({'date': date_range})
         return self._add_calendar_columns(df)
 
@@ -169,8 +172,7 @@ class CalendarGenerator:
             pl.col('apply_start_dt').str.strptime(pl.Date, format='%Y-%m-%d')
         ])
 
-    @staticmethod
-    def _apply_schedule(calendar_df: pl.DataFrame, schedule_df: pl.DataFrame) -> pl.DataFrame:
+    def _apply_schedule(self, calendar_df: pl.DataFrame, schedule_df: pl.DataFrame) -> pl.DataFrame:
         """スケジュールの適用"""
         # スケジュールを結合
         df = calendar_df.join(
@@ -194,6 +196,9 @@ class CalendarGenerator:
             .alias('hours')
         ])
 
+        # 対象年度のみのデータに絞る
+        start_date = self.fiscal_year.get_date_range()[0]
+        df = df.filter(pl.col('date') >= start_date)
         return df
 
     @staticmethod
