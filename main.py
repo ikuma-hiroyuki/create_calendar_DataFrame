@@ -111,7 +111,7 @@ class CalendarGenerator:
         2. _add_calendar_columns() -> 基本列の追加
         """
         start_date, end_date = self.fiscal_year.get_date_range()
-        schedule_start_date = self.schedule_df.filter(pl.col('apply_start_dt') < start_date).max()
+        schedule_start_date = self.schedule_df.filter(pl.col('apply_start_dt') <= start_date).max()
         schedule_start_date = schedule_start_date.to_series().to_list()[0]
         date_range = pl.date_range(schedule_start_date, end_date, interval='1d', eager=True)
         df = pl.DataFrame({'date': date_range})
