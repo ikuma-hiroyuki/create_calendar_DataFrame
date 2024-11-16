@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 import polars as pl
 import requests
@@ -70,7 +70,7 @@ class CalendarGenerator:
         self.schedule_path = schedule_path
         self.output_dir = Path(__file__).resolve().parent / 'results'
         self.output_dir.mkdir(exist_ok=True)
-        self.schedule_df: pl.DataFrame = None
+        self.schedule_df: Optional[pl.DataFrame] = None
 
     def generate(self) -> None:
         """
