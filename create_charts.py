@@ -10,7 +10,7 @@ from plotly.graph_objs import Figure
 
 @dataclass
 class LabelData:
-    """データフレーム・グラフラベル用のデータクラス"""
+    """データフレーム・グラフで共通して使うラベルのデータクラス"""
     weekly_actual_time: str = "週間実績計"
     weekly_target_time: str = "週間目標計"
     period_total_actual_time: str = "実績計"
@@ -61,7 +61,8 @@ class StudyDataProcessor:
         self.labels = LabelData()
 
     def _load_and_preprocess_data(self) -> None:
-        """データの読み込みと前処理
+        """
+        データの読み込みと前処理
 
         - 集計用の週の列を追加
         - 集計対象期間のデータのみ抽出
@@ -88,7 +89,8 @@ class StudyDataProcessor:
         return self._subjects
 
     def _aggregate_data(self, group_cols, actual_col: str, target_col: str) -> pl.DataFrame:
-        """集計の共通処理を行うヘルパーメソッド
+        """
+        集計の共通処理を行うヘルパーメソッド
 
         :param group_cols: グループ化する列名
         :param actual_col: 実績時間の列名
@@ -156,8 +158,8 @@ class StudyDataProcessor:
         # 初期データ構造を作成
         result_data = {
             '期間': result_weeks,
-            **{subject: [] for subject in self.subjects}, # 時間
-            **{f"{subject} {self.labels.achievement_rate}": [] for subject in self.subjects} # 達成率
+            **{subject: [] for subject in self.subjects},  # 時間
+            **{f"{subject} {self.labels.achievement_rate}": [] for subject in self.subjects}  # 達成率
         }
 
         # データを埋める
@@ -200,7 +202,9 @@ class StudyDataVisualizer:
         if self.processor.weekly_detail_pivot is None:
             raise ValueError("週別ピボットデータが計算されていません。")
 
-        achievement_rate_cols = [f"{subject} {self.processor.labels.achievement_rate}" for subject in self.processor.subjects]
+        achievement_rate_cols = [
+            f"{subject} {self.processor.labels.achievement_rate}" for subject in self.processor.subjects
+        ]
 
         return px.bar(
             self.processor.weekly_detail_pivot,
