@@ -55,10 +55,11 @@ class StudyDataProcessor:
         self.weekly_summary: Optional[pl.DataFrame] = None
         self.weekly_total: Optional[pl.DataFrame] = None
         self.period_total: Optional[pl.DataFrame] = None
+        self.weekly_pivoted: Optional[pl.DataFrame] = None
         self._subjects: Optional[List[str]] = None
         self.labels = LabelData()
 
-    def load_and_preprocess_data(self) -> None:
+    def _load_and_preprocess_data(self) -> None:
         """データの読み込みと前処理
 
         - 集計用の週の列を追加
@@ -105,8 +106,9 @@ class StudyDataProcessor:
 
     def calculate_summaries(self) -> None:
         """各種サマリーの計算"""
-        if self.source_df is None:
-            raise ValueError("データが読み込まれていません。load_and_preprocess_data()を先に実行してください。")
+
+        # データの読み込みと前処理
+        self._load_and_preprocess_data()
 
         # 週別・科目別サマリー
         self.weekly_summary = self._aggregate_data(
@@ -115,6 +117,8 @@ class StudyDataProcessor:
             target_col=self.labels.weekly_target_time,
             achievement_rate_col=self.labels.weekly_achievement_rate
         )
+        # 週別・科目別のピボットデータを作成
+        self._create_weekly_pivot()
 
         # 週間合計
         self.weekly_total = self._aggregate_data(
@@ -131,6 +135,41 @@ class StudyDataProcessor:
             target_col=self.labels.period_total_target_time,
             achievement_rate_col=self.labels.weekly_achievement_rate
         )
+
+    def _create_weekly_pivot(self) -> None:
+        """週別の実績・目標時間用のピボットデータを作成"""
+        group = [self.labels.week, self.labels.category]
+        weekly_data = self.source_df.group_by(group).agg([
+            pl.col("実績時間").sum().alias("実績時間"),
+            pl.col("目標時間").sum().alias("目標時間")
+        ]).sort(group)
+
+        weekly_pivoted = weekly_data.pivot(
+            index=self.labels.week,
+            on=self.labels.category,
+            values=["実績時間", "目標時間"]
+        )
+
+        result_weeks = []
+        for week in weekly_pivoted[self.labels.week]:
+            result_weeks.append(f"{week} 実績")
+            result_weeks.append(f"{week} 目標")
+
+        # 初期データ構造を作成
+        result_data = {
+            '期間': result_weeks,
+            **{subject: [] for subject in self.subjects}
+        }
+
+        # データを埋める
+        for week in weekly_pivoted[self.labels.week]:
+            for subject in self.subjects:
+                # 週ごとの目標・実績データを取得
+                subject_weekly_data = weekly_pivoted.filter(pl.col('週') == week)
+                result_data[subject].append(subject_weekly_data[f'実績時間_{subject}'][0])
+                result_data[subject].append(subject_weekly_data[f'目標時間_{subject}'][0])
+
+        self.weekly_pivoted = pl.DataFrame(result_data, strict=False)
 
     def display_summaries(self) -> None:
         """サマリーの表示"""
@@ -154,42 +193,11 @@ class StudyDataVisualizer:
 
     def create_weekly_stacked_bar(self) -> px.bar:
         """週ごと・科目ごとの積み上げ棒グラフ作成"""
-        if self.processor.source_df is None:
-            raise ValueError("データが読み込まれていません。")
-
-        group = [self.processor.labels.week, self.processor.labels.category]
-        weekly_data = self.processor.source_df.group_by(group).agg([
-            pl.col("実績時間").sum().alias("実績時間"),
-            pl.col("目標時間").sum().alias("目標時間")
-        ]).sort(group)
-
-        weekly_pivoted = weekly_data.pivot(
-            index=self.processor.labels.week,
-            on=self.processor.labels.category,
-            values=["実績時間", "目標時間"]
-        )
-
-        result_weeks = []
-        for week in weekly_pivoted[self.processor.labels.week]:
-            result_weeks.append(f"{week} 実績")
-            result_weeks.append(f"{week} 目標")
-
-        # 初期データ構造を作成
-        result_data = {
-            '期間': result_weeks,
-            **{subject: [] for subject in self.processor.subjects}
-        }
-
-        # データを埋める
-        for week in weekly_pivoted[self.processor.labels.week]:
-            for subject in self.processor.subjects:
-                # 週ごとの目標・実績データを取得
-                subject_weekly_data = weekly_pivoted.filter(pl.col('週') == week)
-                result_data[subject].append(subject_weekly_data[f'実績時間_{subject}'][0])
-                result_data[subject].append(subject_weekly_data[f'目標時間_{subject}'][0])
+        if self.processor.weekly_pivoted is None:
+            raise ValueError("週別ピボットデータが計算されていません。")
 
         return px.bar(
-            result_data,
+            self.processor.weekly_pivoted,
             x='期間',
             y=self.processor.subjects,
             title='{} ~ {} 週別の実績時間と目標時間'.format(*self.processor.date_range.range),
@@ -237,7 +245,6 @@ def main():
 
     # データ処理インスタンスの作成と処理実行
     processor = StudyDataProcessor("study.csv", date_range)
-    processor.load_and_preprocess_data()
     processor.calculate_summaries()
     processor.display_summaries()
 
