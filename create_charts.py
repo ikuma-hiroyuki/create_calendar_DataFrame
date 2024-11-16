@@ -14,7 +14,7 @@ class LabelData:
     weekly_target_time: str = "週間目標計"
     period_total_actual_time: str = "実績計"
     period_total_target_time: str = "目標計"
-    weekly_achievement_rate: str = "達成率(%)"
+    achievement_rate: str = "達成率(%)"
     category: str = "科目"
     week: str = "週"
 
@@ -52,10 +52,10 @@ class StudyDataProcessor:
         self.file_path = file_path
         self.date_range = date_range
         self.source_df: Optional[pl.DataFrame] = None
-        self.weekly_summary: Optional[pl.DataFrame] = None
+        self.weekly_detail: Optional[pl.DataFrame] = None
+        self.weekly_detail_pivot: Optional[pl.DataFrame] = None
         self.weekly_total: Optional[pl.DataFrame] = None
         self.period_total: Optional[pl.DataFrame] = None
-        self.weekly_pivoted: Optional[pl.DataFrame] = None
         self._subjects: Optional[List[str]] = None
         self.labels = LabelData()
 
@@ -86,13 +86,12 @@ class StudyDataProcessor:
             raise ValueError("データが読み込まれていません")
         return self._subjects
 
-    def _aggregate_data(self, group_cols, actual_col: str, target_col: str, achievement_rate_col: str) -> pl.DataFrame:
+    def _aggregate_data(self, group_cols, actual_col: str, target_col: str) -> pl.DataFrame:
         """集計の共通処理を行うヘルパーメソッド
 
         :param group_cols: グループ化する列名
         :param actual_col: 実績時間の列名
         :param target_col: 目標時間の列名
-        :param achievement_rate_col: 達成率の列名
         :return: 集計結果のDataFrame
         """
         if isinstance(group_cols, str):
@@ -101,7 +100,7 @@ class StudyDataProcessor:
         return self.source_df.group_by(group_cols).agg([
             pl.col("実績時間").sum().alias(actual_col),
             pl.col("目標時間").sum().alias(target_col),
-            (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(achievement_rate_col)
+            (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate)
         ]).sort(group_cols)
 
     def calculate_summaries(self) -> None:
@@ -110,22 +109,20 @@ class StudyDataProcessor:
         # データの読み込みと前処理
         self._load_and_preprocess_data()
 
-        # 週別・科目別サマリー
-        self.weekly_summary = self._aggregate_data(
+        # 週別・科目別の詳細
+        self.weekly_detail = self._aggregate_data(
             group_cols=[self.labels.week, self.labels.category],
             actual_col=self.labels.weekly_actual_time,
             target_col=self.labels.weekly_target_time,
-            achievement_rate_col=self.labels.weekly_achievement_rate
         )
         # 週別・科目別のピボットデータを作成
-        self._create_weekly_pivot()
+        self.weekly_detail_pivot = self._create_weekly_pivot()
 
         # 週間合計
         self.weekly_total = self._aggregate_data(
             group_cols=self.labels.week,
             actual_col=self.labels.weekly_actual_time,
             target_col=self.labels.weekly_target_time,
-            achievement_rate_col=self.labels.weekly_achievement_rate
         ).with_columns(pl.lit("合計").alias(self.labels.category))
 
         # 期間全体
@@ -133,27 +130,28 @@ class StudyDataProcessor:
             group_cols=self.labels.category,
             actual_col=self.labels.period_total_actual_time,
             target_col=self.labels.period_total_target_time,
-            achievement_rate_col=self.labels.weekly_achievement_rate
         )
 
-    def _create_weekly_pivot(self) -> None:
+    def _create_weekly_pivot(self) -> pl.DataFrame:
         """週別の実績・目標時間用のピボットデータを作成"""
         group = [self.labels.week, self.labels.category]
         weekly_data = self.source_df.group_by(group).agg([
             pl.col("実績時間").sum().alias("実績時間"),
-            pl.col("目標時間").sum().alias("目標時間")
+            pl.col("目標時間").sum().alias("目標時間"),
+            # (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate)
         ]).sort(group)
 
-        weekly_pivoted = weekly_data.pivot(
+        weekly_pivot = weekly_data.pivot(
             index=self.labels.week,
             on=self.labels.category,
             values=["実績時間", "目標時間"]
         )
 
         result_weeks = []
-        for week in weekly_pivoted[self.labels.week]:
+        for week in weekly_pivot[self.labels.week]:
             result_weeks.append(f"{week} 実績")
             result_weeks.append(f"{week} 目標")
+            # result_weeks.append(f"{week} {self.labels.achievement_rate}")
 
         # 初期データ構造を作成
         result_data = {
@@ -162,23 +160,24 @@ class StudyDataProcessor:
         }
 
         # データを埋める
-        for week in weekly_pivoted[self.labels.week]:
+        for week in weekly_pivot[self.labels.week]:
             for subject in self.subjects:
                 # 週ごとの目標・実績データを取得
-                subject_weekly_data = weekly_pivoted.filter(pl.col('週') == week)
+                subject_weekly_data = weekly_pivot.filter(pl.col('週') == week)
                 result_data[subject].append(subject_weekly_data[f'実績時間_{subject}'][0])
                 result_data[subject].append(subject_weekly_data[f'目標時間_{subject}'][0])
+                # result_data[subject].append(subject_weekly_data[f'{self.labels.achievement_rate}_{subject}'][0])
 
-        self.weekly_pivoted = pl.DataFrame(result_data, strict=False)
+        return pl.DataFrame(result_data, strict=False)
 
     def display_summaries(self) -> None:
         """サマリーの表示"""
-        if any(x is None for x in [self.weekly_summary, self.weekly_total, self.period_total]):
+        if any(x is None for x in [self.weekly_detail, self.weekly_total, self.period_total]):
             raise ValueError("サマリーが計算されていません。calculate_summaries()を先に実行してください。")
 
         print(f"\n集計期間: {self.date_range.start_date} ～ {self.date_range.end_date}")
         print("\n週別サマリー:")
-        print(self.weekly_summary)
+        print(self.weekly_detail)
         print("\n週間合計:")
         print(self.weekly_total)
         print("\n期間全体:")
@@ -193,48 +192,50 @@ class StudyDataVisualizer:
 
     def create_weekly_stacked_bar(self) -> px.bar:
         """週ごと・科目ごとの積み上げ棒グラフ作成"""
-        if self.processor.weekly_pivoted is None:
+        if self.processor.weekly_detail_pivot is None:
             raise ValueError("週別ピボットデータが計算されていません。")
 
         return px.bar(
-            self.processor.weekly_pivoted,
+            self.processor.weekly_detail_pivot,
             x='期間',
             y=self.processor.subjects,
             title='{} ~ {} 週別の実績時間と目標時間'.format(*self.processor.date_range.range),
             labels={'value': '時間', 'variable': '科目'},
             barmode='stack',
+            # hover_data=[self.processor.labels.achievement_rate],
+        )
+
+    def _create_common_bar(self, data: pl.DataFrame, x: str, y: List[str], title: str) -> px.bar:
+        """棒グラフの共通生成処理"""
+        if data is None:
+            raise ValueError("データが計算されていません。")
+
+        return px.bar(
+            data,
+            x=x,
+            y=y,
+            title=title,
+            labels={"value": "時間", "variable": "種別"},
+            barmode="group",
+            hover_data=[self.processor.labels.achievement_rate],
         )
 
     def create_total_weekly_bar(self) -> px.bar:
         """週ごとの総計棒グラフの作成"""
-        if self.processor.weekly_total is None:
-            raise ValueError("週間合計が計算されていません。")
-
-        labels = self.processor.labels
-
-        return px.bar(
-            self.processor.weekly_total,
-            x=labels.week,
-            y=[labels.weekly_actual_time, labels.weekly_target_time],
-            title='{} ~ {} 週ごとの総計実績時間と目標時間'.format(*self.processor.date_range.range),
-            labels={"value": "時間", "variable": "カテゴリー"},
-            barmode="group"
+        return self._create_common_bar(
+            data=self.processor.weekly_total,
+            x=self.processor.labels.week,
+            y=[self.processor.labels.weekly_actual_time, self.processor.labels.weekly_target_time],
+            title='{} ~ {} 週ごとの総計実績時間と目標時間'.format(*self.processor.date_range.range)
         )
 
     def create_period_total_bar(self) -> px.bar:
         """期間全体の総計棒グラフの作成"""
-        if self.processor.period_total is None:
-            raise ValueError("期間合計が計算されていません。")
-
-        labels = self.processor.labels
-
-        return px.bar(
-            self.processor.period_total,
-            x=labels.category,
-            y=[labels.period_total_actual_time, labels.period_total_target_time],
-            title="{} ~ {} 期間全体の実績時間と目標時間".format(*self.processor.date_range.range),
-            labels={"value": "時間", "variable": "カテゴリー"},
-            barmode="group"
+        return self._create_common_bar(
+            data=self.processor.period_total,
+            x=self.processor.labels.category,
+            y=[self.processor.labels.period_total_actual_time, self.processor.labels.period_total_target_time],
+            title="{} ~ {} 期間全体の実績時間と目標時間".format(*self.processor.date_range.range)
         )
 
 
