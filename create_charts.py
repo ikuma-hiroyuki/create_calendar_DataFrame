@@ -5,6 +5,7 @@ from typing import Optional, List, Tuple
 
 import plotly.express as px
 import polars as pl
+from plotly.graph_objs import Figure
 
 
 @dataclass
@@ -138,35 +139,39 @@ class StudyDataProcessor:
         weekly_data = self.source_df.group_by(group).agg([
             pl.col("実績時間").sum().alias("実績時間"),
             pl.col("目標時間").sum().alias("目標時間"),
-            # (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate)
+            (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate)
         ]).sort(group)
 
         weekly_pivot = weekly_data.pivot(
             index=self.labels.week,
             on=self.labels.category,
-            values=["実績時間", "目標時間"]
+            values=["実績時間", "目標時間", self.labels.achievement_rate]
         )
 
         result_weeks = []
         for week in weekly_pivot[self.labels.week]:
             result_weeks.append(f"{week} 実績")
             result_weeks.append(f"{week} 目標")
-            # result_weeks.append(f"{week} {self.labels.achievement_rate}")
 
         # 初期データ構造を作成
         result_data = {
             '期間': result_weeks,
-            **{subject: [] for subject in self.subjects}
+            **{subject: [] for subject in self.subjects}, # 時間
+            **{f"{subject} {self.labels.achievement_rate}": [] for subject in self.subjects} # 達成率
         }
 
         # データを埋める
         for week in weekly_pivot[self.labels.week]:
             for subject in self.subjects:
                 # 週ごとの目標・実績データを取得
-                subject_weekly_data = weekly_pivot.filter(pl.col('週') == week)
-                result_data[subject].append(subject_weekly_data[f'実績時間_{subject}'][0])
-                result_data[subject].append(subject_weekly_data[f'目標時間_{subject}'][0])
-                # result_data[subject].append(subject_weekly_data[f'{self.labels.achievement_rate}_{subject}'][0])
+                subject_weekly_time = weekly_pivot.filter(pl.col('週') == week)
+                result_data[subject].append(subject_weekly_time[f'実績時間_{subject}'][0])
+                result_data[subject].append(subject_weekly_time[f'目標時間_{subject}'][0])
+
+                achievement_rate = subject_weekly_time[f'{self.labels.achievement_rate}_{subject}'][0]
+                achievement_rate_key = f"{subject} {self.labels.achievement_rate}"
+                result_data[achievement_rate_key].append(achievement_rate)
+                result_data[achievement_rate_key].append(achievement_rate)
 
         return pl.DataFrame(result_data, strict=False)
 
@@ -190,10 +195,12 @@ class StudyDataVisualizer:
     def __init__(self, processor: StudyDataProcessor):
         self.processor = processor
 
-    def create_weekly_stacked_bar(self) -> px.bar:
+    def create_weekly_stacked_bar(self) -> Figure:
         """週ごと・科目ごとの積み上げ棒グラフ作成"""
         if self.processor.weekly_detail_pivot is None:
             raise ValueError("週別ピボットデータが計算されていません。")
+
+        achievement_rate_cols = [f"{subject} {self.processor.labels.achievement_rate}" for subject in self.processor.subjects]
 
         return px.bar(
             self.processor.weekly_detail_pivot,
@@ -202,10 +209,10 @@ class StudyDataVisualizer:
             title='{} ~ {} 週別の実績時間と目標時間'.format(*self.processor.date_range.range),
             labels={'value': '時間', 'variable': '科目'},
             barmode='stack',
-            # hover_data=[self.processor.labels.achievement_rate],
+            hover_data=achievement_rate_cols
         )
 
-    def _create_common_bar(self, data: pl.DataFrame, x: str, y: List[str], title: str) -> px.bar:
+    def _create_common_bar(self, data: pl.DataFrame, x: str, y: List[str], title: str) -> Figure:
         """棒グラフの共通生成処理"""
         if data is None:
             raise ValueError("データが計算されていません。")
@@ -220,7 +227,7 @@ class StudyDataVisualizer:
             hover_data=[self.processor.labels.achievement_rate],
         )
 
-    def create_total_weekly_bar(self) -> px.bar:
+    def create_total_weekly_bar(self) -> Figure:
         """週ごとの総計棒グラフの作成"""
         return self._create_common_bar(
             data=self.processor.weekly_total,
@@ -229,7 +236,7 @@ class StudyDataVisualizer:
             title='{} ~ {} 週ごとの総計実績時間と目標時間'.format(*self.processor.date_range.range)
         )
 
-    def create_period_total_bar(self) -> px.bar:
+    def create_period_total_bar(self) -> Figure:
         """期間全体の総計棒グラフの作成"""
         return self._create_common_bar(
             data=self.processor.period_total,
@@ -247,7 +254,7 @@ def main():
     # データ処理インスタンスの作成と処理実行
     processor = StudyDataProcessor("study.csv", date_range)
     processor.calculate_summaries()
-    processor.display_summaries()
+    # processor.display_summaries()
 
     # 可視化インスタンスの作成とグラフの表示
     visualizer = StudyDataVisualizer(processor)
