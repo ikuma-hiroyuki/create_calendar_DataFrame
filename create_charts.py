@@ -10,7 +10,7 @@ from plotly.graph_objs import Figure
 
 @dataclass
 class LabelData:
-    """グラフラベル用のデータクラス"""
+    """データフレーム・グラフラベル用のデータクラス"""
     weekly_actual_time: str = "週間実績計"
     weekly_target_time: str = "週間目標計"
     period_total_actual_time: str = "実績計"
