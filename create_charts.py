@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple
 
 import plotly.express as px
 import polars as pl
-from plotly.graph_objs import Figure
+from plotly.graph_objs import Bar, Figure
 
 
 @dataclass
@@ -42,8 +42,8 @@ class DateRange:
         return self._end_dt
 
     @property
-    def range(self) -> Tuple[date, date]:
-        return self._start_dt, self._end_dt
+    def range(self) -> Tuple[str, str]:
+        return self._start_dt.strftime("%y/%m/%d(%a)"), self._end_dt.strftime("%y/%m/%d(%a)")
 
 
 class StudyDataProcessor:
@@ -233,27 +233,78 @@ class StudyDataVisualizer:
 
     def create_total_weekly_bar(self) -> Figure:
         """週ごとの総計棒グラフの作成"""
-        return self._create_common_bar(
-            data=self.processor.weekly_total,
+
+        return px.bar(
+            self.processor.weekly_total,
             x=self.processor.labels.week,
             y=[self.processor.labels.weekly_actual_time, self.processor.labels.weekly_target_time],
-            title='{} ~ {} 週ごとの総計実績時間と目標時間'.format(*self.processor.date_range.range)
-        )
+            title='{} ~ {} 週ごとの総計実績時間と目標時間'.format(*self.processor.date_range.range),
+            labels={"value": "時間", "variable": "種別"},
+            barmode="group",
+            hover_data=[self.processor.labels.achievement_rate], )
 
     def create_period_total_bar(self) -> Figure:
         """期間全体の総計棒グラフの作成"""
-        return self._create_common_bar(
-            data=self.processor.period_total,
-            x=self.processor.labels.category,
-            y=[self.processor.labels.period_total_actual_time, self.processor.labels.period_total_target_time],
-            title="{} ~ {} 期間全体の実績時間と目標時間".format(*self.processor.date_range.range)
+        if self.processor.period_total is None:
+            raise ValueError("データが計算されていません。")
+
+        # 科目ごとの色の定義
+        color_map = {
+            "国語": {"target": "#F7BA89", "actual": "#F49D57"},
+            "数学": {"target": "#7DD4AF", "actual": "#46C28E"},
+            "英語": {"target": "#E78974", "actual": "#DE5739"},
+            "社会": {"target": "#B78AF6", "actual": "#9959F3"},
+            "理科": {"target": "#8A8FF6", "actual": "#585FF3"},
+            "化学": {"target": "#8A8FF6", "actual": "#585FF3"}
+        }
+
+        df = self.processor.period_total
+        fig = Figure()
+
+        bar_settings = {
+            "target": {
+                "name": "目標",
+                "color": [color_map[subject]["target"] for subject in df[self.processor.labels.category]],
+                "y": df[self.processor.labels.period_total_target_time],
+            },
+            "actual": {
+                "name": "実績",
+                "color": [color_map[subject]["actual"] for subject in df[self.processor.labels.category]],
+                "y": df[self.processor.labels.period_total_actual_time],
+            }
+        }
+
+        for bar_type, settings in bar_settings.items():
+            fig.add_trace(Bar(
+                name=settings["name"],
+                x=df[self.processor.labels.category],
+                y=settings["y"],
+                marker_color=settings["color"],
+                customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
+                hovertemplate=f"科目: %{{customdata[0]}}<br>{settings['name']}: %{{y:.1f}}時間<br>達成率: %{{customdata[1]:.1f}}%<extra></extra>",
+            ))
+
+        # レイアウトの設定
+        font_size = 20
+        fig.update_layout(
+            title=dict(text="{} ~ {} の実績時間と目標時間".format(*self.processor.date_range.range),
+                       font=dict(size=font_size), ),
+            xaxis_title="科目",
+            xaxis=dict(title_font=dict(size=font_size), tickfont=dict(size=font_size)),
+            yaxis_title="時間",
+            yaxis=dict(title_font=dict(size=font_size), tickfont=dict(size=font_size)),
+            barmode='group',
+            hoverlabel=dict(font_size=font_size),
+            showlegend=False,
         )
+
+        return fig
 
 
 def main():
     """メイン処理"""
     # 日付範囲の設定
-    date_range = DateRange('2024/04/01', '2024/04/30')
+    date_range = DateRange('2024/04/01', '2024/04/07')
 
     # データ処理インスタンスの作成と処理実行
     processor = StudyDataProcessor("study.csv", date_range)
@@ -262,16 +313,16 @@ def main():
 
     # 可視化インスタンスの作成とグラフの表示
     visualizer = StudyDataVisualizer(processor)
-    fig1 = visualizer.create_weekly_stacked_bar()
-    fig2 = visualizer.create_total_weekly_bar()
+    # fig1 = visualizer.create_weekly_stacked_bar()
+    # fig2 = visualizer.create_total_weekly_bar()
     fig3 = visualizer.create_period_total_bar()
 
     # グラフの保存
     base_dir = Path(__file__).resolve().parent
     output_dir = base_dir / "results"
     output_dir.mkdir(exist_ok=True)
-    fig1.write_html(output_dir / "weekly_stacked_bar.html")
-    fig2.write_html(output_dir / "total_weekly_bar.html")
+    # fig1.write_html(output_dir / "weekly_stacked_bar.html")
+    # fig2.write_html(output_dir / "total_weekly_bar.html")
     fig3.write_html(output_dir / "period_total_bar.html")
 
 
