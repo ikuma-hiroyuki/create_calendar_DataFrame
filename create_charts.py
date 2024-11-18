@@ -196,6 +196,35 @@ class StudyDataVisualizer:
 
     def __init__(self, processor: StudyDataProcessor):
         self.processor = processor
+        self.color_map = self.set_colors()
+
+    @staticmethod
+    def set_colors():
+        # 科目ごとの色の定義（実績の色をベースに設定）
+        color_map = {
+            "国語": {"base": "#F49D57"},
+            "数学": {"base": "#46C28E"},
+            "英語": {"base": "#DE5739"},
+            "社会": {"base": "#9959F3"},
+            "理科": {"base": "#585FF3"},
+            "化学": {"base": "#585FF3"}
+        }
+
+        # 各科目の色に対して、実績と目標の色を設定
+        for subject, colors in color_map.items():
+            # 実績は元の色をそのまま使用
+            colors["actual"] = colors["base"]
+
+            # 目標は枠線を実績と同じ色に、内部は透明度を高くした同色を使用
+            colors["target_line"] = colors["base"]
+            # rgba形式で透明度0.3の色を設定
+            base_rgb = colors["base"].lstrip('#')
+            r = int(base_rgb[:2], 16)
+            g = int(base_rgb[2:4], 16)
+            b = int(base_rgb[4:], 16)
+            colors["target_fill"] = f"rgba({r},{g},{b},0.3)"
+
+        return color_map
 
     def create_weekly_stacked_bar(self) -> Figure:
         """週ごと・科目ごとの積み上げ棒グラフ作成"""
@@ -244,45 +273,37 @@ class StudyDataVisualizer:
             hover_data=[self.processor.labels.achievement_rate], )
 
     def create_period_total_bar(self) -> Figure:
-        """期間全体の総計棒グラフの作成"""
         if self.processor.period_total is None:
             raise ValueError("データが計算されていません。")
-
-        # 科目ごとの色の定義
-        color_map = {
-            "国語": {"target": "#F7BA89", "actual": "#F49D57"},
-            "数学": {"target": "#7DD4AF", "actual": "#46C28E"},
-            "英語": {"target": "#E78974", "actual": "#DE5739"},
-            "社会": {"target": "#B78AF6", "actual": "#9959F3"},
-            "理科": {"target": "#8A8FF6", "actual": "#585FF3"},
-            "化学": {"target": "#8A8FF6", "actual": "#585FF3"}
-        }
 
         df = self.processor.period_total
         fig = Figure()
 
-        bar_settings = {
-            "target": {
-                "name": "目標",
-                "color": [color_map[subject]["target"] for subject in df[self.processor.labels.category]],
-                "y": df[self.processor.labels.period_total_target_time],
-            },
-            "actual": {
-                "name": "実績",
-                "color": [color_map[subject]["actual"] for subject in df[self.processor.labels.category]],
-                "y": df[self.processor.labels.period_total_actual_time],
-            }
-        }
+        # 実績バーの追加
+        fig.add_trace(Bar(
+            name="実績",
+            x=df[self.processor.labels.category],
+            y=df[self.processor.labels.period_total_actual_time],
+            marker=dict(color=[self.color_map[subject]["actual"] for subject in df[self.processor.labels.category]]),
+            customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
+            hovertemplate="科目: %{customdata[0]}<br>実績: %{y:.1f}時間<br>達成率: %{customdata[1]:.1f}%<extra></extra>"
+        ))
 
-        for bar_type, settings in bar_settings.items():
-            fig.add_trace(Bar(
-                name=settings["name"],
-                x=df[self.processor.labels.category],
-                y=settings["y"],
-                marker_color=settings["color"],
-                customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
-                hovertemplate=f"科目: %{{customdata[0]}}<br>{settings['name']}: %{{y:.1f}}時間<br>達成率: %{{customdata[1]:.1f}}%<extra></extra>",
-            ))
+        # 目標バーの追加（枠線あり、内部は薄い色）
+        fig.add_trace(Bar(
+            name="目標",
+            x=df[self.processor.labels.category],
+            y=df[self.processor.labels.period_total_target_time],
+            marker=dict(
+                color=[self.color_map[subject]["target_fill"] for subject in df[self.processor.labels.category]],
+                line=dict(
+                    color=[self.color_map[subject]["target_line"] for subject in df[self.processor.labels.category]],
+                    width=2
+                )
+            ),
+            customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
+            hovertemplate="科目: %{customdata[0]}<br>目標: %{y:.1f}時間<br>達成率: %{customdata[1]:.1f}%<extra></extra>"
+        ))
 
         # レイアウトの設定
         font_size = 20
