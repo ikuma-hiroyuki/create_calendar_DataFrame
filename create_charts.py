@@ -207,9 +207,8 @@ class StudyDataVisualizer:
             "国語": {"base": "#F49D57"},
             "数学": {"base": "#46C28E"},
             "英語": {"base": "#DE5739"},
-            "社会": {"base": "#9959F3"},
             "理科": {"base": "#585FF3"},
-            "化学": {"base": "#585FF3"}
+            "社会": {"base": "#9959F3"},
         }
 
         # 各科目の色に対して、実績と目標の色を設定
@@ -329,8 +328,8 @@ class StudyDataVisualizer:
             showlegend=False,
         )
 
-        order = ["国語", "数学", "英語", "理科", "社会"]
-        fig.update_layout(xaxis=dict(categoryorder='array', categoryarray=order))
+        # x軸の順序を科目の順序に設定
+        fig.update_layout(xaxis=dict(categoryorder='array', categoryarray=list(self.color_map.keys())))
 
         return fig
 
