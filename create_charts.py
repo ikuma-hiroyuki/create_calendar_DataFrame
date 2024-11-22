@@ -291,6 +291,8 @@ class StudyDataVisualizer:
         font_size = 20
 
         # 実績バーの追加
+        formatted_values = [f"+{val:.1f}" if val > 0 else f"{val:.1f}" for val in
+                            df[self.processor.labels.study_over_target]]
         fig.add_trace(Bar(
             name=items[0],
             x=df[self.processor.labels.category],
@@ -298,9 +300,9 @@ class StudyDataVisualizer:
             marker=dict(color=[self.color_map[subject]["actual"] for subject in df[self.processor.labels.category]]),
             customdata=custom_data,
             hovertemplate=hover_templates[0],
-            text=df[self.processor.labels.study_over_target],
+            text=formatted_values,
             textposition='outside',
-            texttemplate='%{text:.1f}時間',
+            texttemplate='%{text}時間',
             textfont=dict(size=font_size),
         ))
 
