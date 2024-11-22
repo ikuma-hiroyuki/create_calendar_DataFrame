@@ -16,6 +16,7 @@ class LabelData:
     period_total_actual_time: str = "実績計"
     period_total_target_time: str = "目標計"
     achievement_rate: str = "達成率(%)"
+    study_over_target: str = "目標超過"
     category: str = "科目"
     week: str = "週"
 
@@ -103,7 +104,8 @@ class StudyDataProcessor:
         return self.source_df.group_by(group_cols).agg([
             pl.col("実績時間").sum().alias(actual_col),
             pl.col("目標時間").sum().alias(target_col),
-            (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate)
+            (pl.col("実績時間").sum() / pl.col("目標時間").sum() * 100).round(1).alias(self.labels.achievement_rate),
+            (pl.col("実績時間").sum() - pl.col("目標時間").sum()).alias(self.labels.study_over_target)
         ]).sort(group_cols)
 
     def calculate_summaries(self) -> None:
@@ -279,28 +281,40 @@ class StudyDataVisualizer:
         df = self.processor.period_total
         fig = Figure()
 
+        # 共通項目
+        items = ["実績", "目標"]
+        hover_templates = [
+            f"科目: %{{customdata[0]}}<br>{item}: %{{y:.1f}}時間<br>目標超過: %{{customdata[1]:.1f}}時間<extra></extra>"
+            for item in items
+        ]
+        custom_data = list(zip(df[self.processor.labels.category], df[self.processor.labels.study_over_target]))
+        font_size = 20
+
         # 実績バーの追加
         fig.add_trace(Bar(
-            name="実績",
+            name=items[0],
             x=df[self.processor.labels.category],
             y=df[self.processor.labels.period_total_actual_time],
             marker=dict(color=[self.color_map[subject]["actual"] for subject in df[self.processor.labels.category]]),
-            customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
-            hovertemplate="科目: %{customdata[0]}<br>実績: %{y:.1f}時間<br>達成率: %{customdata[1]:.1f}%<extra></extra>"
+            customdata=custom_data,
+            hovertemplate=hover_templates[0],
+            text=df[self.processor.labels.study_over_target],
+            textposition='outside',
+            texttemplate='%{text:.1f}時間',
+            textfont=dict(size=font_size),
         ))
 
-        # 目標バーの追加（枠線あり、内部は薄い色）
+        # 目標バーの追加
         fig.add_trace(Bar(
-            name="目標",
+            name=items[1],
             x=df[self.processor.labels.category],
             y=df[self.processor.labels.period_total_target_time],
             marker=dict(color='white', ),
-            customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
-            hovertemplate="科目: %{customdata[0]}<br>目標: %{y:.1f}時間<br>達成率: %{customdata[1]:.1f}%<extra></extra>"
+            customdata=custom_data,
+            hovertemplate=hover_templates[1],
         ))
 
         # レイアウトの設定
-        font_size = 20
         fig.update_layout(
             title=dict(text="{} ~ {} の実績時間と目標時間".format(*self.processor.date_range.range),
                        font=dict(size=font_size), ),
