@@ -222,7 +222,7 @@ class StudyDataVisualizer:
             r = int(base_rgb[:2], 16)
             g = int(base_rgb[2:4], 16)
             b = int(base_rgb[4:], 16)
-            colors["target_fill"] = f"rgba({r},{g},{b},0.3)"
+            colors["target_fill"] = f"rgba({r},{g},{b},0.1)"
 
         return color_map
 
@@ -318,6 +318,9 @@ class StudyDataVisualizer:
             hoverlabel=dict(font_size=font_size),
             showlegend=False,
         )
+
+        order = ["国語", "数学", "英語", "理科", "社会"]
+        fig.update_layout(xaxis=dict(categoryorder='array', categoryarray=order))
 
         return fig
 
