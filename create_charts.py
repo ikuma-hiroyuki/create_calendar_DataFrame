@@ -294,13 +294,7 @@ class StudyDataVisualizer:
             name="目標",
             x=df[self.processor.labels.category],
             y=df[self.processor.labels.period_total_target_time],
-            marker=dict(
-                color=[self.color_map[subject]["target_fill"] for subject in df[self.processor.labels.category]],
-                line=dict(
-                    color=[self.color_map[subject]["target_line"] for subject in df[self.processor.labels.category]],
-                    width=2
-                )
-            ),
+            marker=dict(color='white', ),
             customdata=list(zip(df[self.processor.labels.category], df[self.processor.labels.achievement_rate])),
             hovertemplate="科目: %{customdata[0]}<br>目標: %{y:.1f}時間<br>達成率: %{customdata[1]:.1f}%<extra></extra>"
         ))
