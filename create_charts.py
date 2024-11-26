@@ -223,7 +223,7 @@ class StudyDataVisualizer:
             r = int(base_rgb[:2], 16)
             g = int(base_rgb[2:4], 16)
             b = int(base_rgb[4:], 16)
-            colors["target_fill"] = f"rgba({r},{g},{b},0.1)"
+            colors["target_fill"] = f"rgba({r},{g},{b},0.3)"
 
         return color_map
 
@@ -310,7 +310,8 @@ class StudyDataVisualizer:
             name=items[1],
             x=df[self.processor.labels.category],
             y=df[self.processor.labels.period_total_target_time],
-            marker=dict(color='white', ),
+            marker=dict(
+                color=[self.color_map[subject]["target_fill"] for subject in df[self.processor.labels.category]]),
             customdata=custom_data,
             hovertemplate=hover_templates[1],
         ))
